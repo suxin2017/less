@@ -1,0 +1,22 @@
+[package]
+name = "less"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[workspace]
+members = [
+    "less-ast",
+    "less-error",
+    "less-formater",
+    "less-lexer",
+    "less-macro",
+    "less-parser", "less-test-data",
+    "less-wasm",
+]
+
+[workspace.dependencies]
+serde = { version = "1.0.195", features = ["derive"] }
+thiserror = "1.0"
