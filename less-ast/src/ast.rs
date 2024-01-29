@@ -60,18 +60,13 @@ pub struct VariableDefined {
     pub value: VariableValueList,
 }
 
-// use , split
-pub type VariableValueList = Vec<VariableValueComponentList>;
-
-// use ' ' split
-pub type VariableValueComponentList = Vec<VariableDefinedValue>;
+pub type VariableValueList = Vec<VariableDefinedValue>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum VariableDefinedValue {
     // 1 + 2
     Express(Express),
     Ident(Ident),
-
     PreservedToken(PreservedToken),
 }
 

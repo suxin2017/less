@@ -20,3 +20,4 @@ members = [
 [workspace.dependencies]
 serde = { version = "1.0.195", features = ["derive"] }
 thiserror = "1.0"
+log = "0.4.20"

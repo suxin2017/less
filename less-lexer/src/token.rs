@@ -2,14 +2,14 @@ use std::path::Display;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Token {
     pub kind: Kind,
     pub start: usize,
     pub end: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Kind {
     Ident,
     AtKeyword,
@@ -17,36 +17,35 @@ pub enum Kind {
     Number,
     Comment,
 
-    LeftParen,      // (
-    RightParen,     // )
-    LeftBracket,    // [
-    RightBracket,   // ]
-    LeftBrace,      // {
-    RightBrace,     // }
-    Comma,          // ,
-    Colon,          // :
-    Semicolon,      // ;
-    Equals,         // =
-    Minus,          // -
-    Plus,           // +
-    Asterisk,       // *
-    Slash,          // /
-    Percent, // %
-    Caret,          // ^
-    CaretEquals,    // ^=
-    Tilde,          // ~
-    TildeEquals,    // ~=
-    Pipe,           // |
-    PipeEquals,     // |=
-    DollarEquals,   // $=
-    GreaterThan,    // >
-    Ampersand,      // &
-    Bang,           // !
-    Hash,           // #
+    LeftParen,    // (
+    RightParen,   // )
+    LeftBracket,  // [
+    RightBracket, // ]
+    LeftBrace,    // {
+    RightBrace,   // }
+    Comma,        // ,
+    Colon,        // :
+    Semicolon,    // ;
+    Equals,       // =
+    Minus,        // -
+    Plus,         // +
+    Asterisk,     // *
+    Slash,        // /
+    Percent,      // %
+    Caret,        // ^
+    CaretEquals,  // ^=
+    Tilde,        // ~
+    TildeEquals,  // ~=
+    Pipe,         // |
+    PipeEquals,   // |=
+    DollarEquals, // $=
+    GreaterThan,  // >
+    Ampersand,    // &
+    Bang,         // !
+    Hash,         // #
 
+    Dot, // .
 
-    Dot,     // .
-   
     Whitespace,
     EOF,
 }
@@ -100,7 +99,6 @@ impl std::fmt::Display for Kind {
             Kind::Hash => write!(f, "Hash"),
             Kind::Dot => write!(f, "Dot"),
             Kind::Percent => write!(f, "Percent"),
-            
         }
     }
 }

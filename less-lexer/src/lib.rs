@@ -37,9 +37,9 @@ pub struct Lexer<'source> {
 
     token_stash: VecDeque<Token>,
 
-    chars: CharIndices<'source>,
+    pub chars: CharIndices<'source>,
 
-    stack_charts: VecDeque<CharIndices<'source>>,
+    stack_charts: VecDeque<(CharIndices<'source>, VecDeque<Token>)>,
 }
 
 impl<'source> Lexer<'source> {
@@ -62,10 +62,14 @@ impl<'source> Lexer<'source> {
         self.chars.clone().next()
     }
     pub fn start(&mut self) {
-        self.stack_charts.push_back(self.chars.clone());
+        self.stack_charts
+            .push_back((self.chars.clone(), self.token_stash.clone()));
     }
     pub fn restore(&mut self) {
-        self.chars = self.stack_charts.pop_back().unwrap();
+        if let Some((chars, stash)) = self.stack_charts.pop_back() {
+            self.chars = chars;
+            self.token_stash = stash;
+        }
     }
 
     pub fn eat_until_end_line(&mut self) -> usize {
@@ -197,6 +201,8 @@ impl<'source> Lexer<'source> {
                                 } else {
                                     break;
                                 }
+                            } else {
+                                break;
                             }
                         }
                         return Ok(Token::new(Kind::Whitespace, pos, pos + 1));
@@ -377,12 +383,12 @@ impl<'source> Lexer<'source> {
 
     pub fn peek(&mut self) -> Result<&Token, LexerError> {
         if !self.token_stash.is_empty() {
-            return Ok(self.token_stash.back().unwrap());
+            return Ok(self.token_stash.front().unwrap());
         }
         let token = self.get_token()?;
 
         self.token_stash.push_back(token);
-        return Ok(self.token_stash.back().unwrap());
+        return Ok(self.token_stash.front().unwrap());
     }
 
     pub fn peek_nth(&mut self, n: usize) -> Result<&Token, LexerError> {
@@ -392,10 +398,10 @@ impl<'source> Lexer<'source> {
 
         let nth = if self.token_stash.is_empty() {
             n
-        } else{
+        } else {
             n - self.token_stash.len()
         };
-       
+
         for _ in 0..=nth {
             let token = self.get_token()?;
             self.token_stash.push_back(token);
@@ -621,6 +627,7 @@ a b c
         lex.next_skip_whitespace(),
         Ok(Token::new(Kind::Ident, 5, 6))
     );
+    assert_eq!(lex.next(), Ok(Token::new(Kind::Whitespace, 7, 8)));
     lex.restore();
     assert_eq!(lex.next(), Ok(Token::new(Kind::Ident, 1, 2)));
     assert_eq!(
@@ -640,7 +647,6 @@ a b c
         Ok(Token::new(Kind::Ident, 5, 6))
     );
 }
-
 
 #[test]
 fn peek_nth() {

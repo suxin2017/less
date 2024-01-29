@@ -8,4 +8,7 @@ edition = "2021"
 [dependencies]
 less-lexer = { path = "../less-lexer" }
 less-ast = { path = "../less-ast" }
+less-test-data = { path = "../less-test-data" }
 thiserror = { workspace = true }
+log = { workspace = true }
+simplelog = "^0.12.0"
