@@ -408,22 +408,17 @@ impl<'source> Parser<'source> {
         while !self.is_at_right_curly_bracket() {
             self.lexer.start();
             let name = self.expect_skit_whitespace(Kind::Ident)?;
-            dbg!(&name);
             if self.is_at_colon() {
                 self.expect_skit_whitespace(Kind::Colon)?;
                 let value = self.parse_value_list()?;
-                dbg!(&value);
-                //FIXME: should get the last token span
-                let mut end = 0;
 
                 // the next token should have three result
                 // ;} or } or ; Ident
                 if self.is_at_semicolon() {
-                    end = self.expect(Kind::Semicolon)?.end;
+                    self.expect(Kind::Semicolon)?;
                 }
                 declaration_list.push(Declaration {
                     name: self.get_atom(&name),
-                    span: Span::new(name.start, end),
                     value,
                 });
                 let is_at_right_curly_bracket = self.is_at_right_curly_bracket();

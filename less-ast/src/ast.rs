@@ -1,6 +1,7 @@
 use less_lexer::token::Token;
 use serde::{Deserialize, Serialize};
 
+
 pub type Atom = String;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,6 +71,7 @@ pub enum VariableDefinedValue {
     PreservedToken(PreservedToken),
 }
 
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MapVariableDefined {
     pub name: AtKeyword,
@@ -81,11 +83,10 @@ pub type DeclarationList = Vec<Declaration>;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Declaration {
     pub name: Atom,
-    pub span: Span,
     pub value: DeclarationProps,
 }
 
-pub type DeclarationProps =VariableValueList;
+pub type DeclarationProps = VariableValueList;
 
 pub type ComponentValueList = Vec<ComponentValue>;
 
@@ -173,8 +174,8 @@ pub enum Selector {
  */
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SimpleSelector {
-  pub span: Span,
-  pub name: Atom
+    pub span: Span,
+    pub name: Atom,
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PseudoSelector {
@@ -194,21 +195,7 @@ pub struct PseudoElement {
     pub span: Span,
     pub name: Atom,
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct IdSelector {
-    pub span: Span,
-    pub value: Atom,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ClassSelector {
-    pub span: Span,
-    pub value: Atom,
-}
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TypeSelector {
-    pub span: Span,
-    pub value: Atom,
-}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PreservedToken {
     Ident(Ident),

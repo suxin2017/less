@@ -13,7 +13,7 @@ members = [
     "less-formater",
     "less-lexer",
     "less-macro",
-    "less-parser", "less-test-data",
+    "less-parser", "less-test-data", "less-visit",
     "less-wasm",
 ]
 

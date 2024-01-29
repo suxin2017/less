@@ -66,6 +66,13 @@ name = "less-test-data"
 version = "0.1.0"
 
 [[package]]
+name = "less-visit"
+version = "0.1.0"
+dependencies = [
+ "less-ast",
+]
+
+[[package]]
 name = "less-wasm"
 version = "0.1.0"
 
