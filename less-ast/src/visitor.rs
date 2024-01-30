@@ -1,8 +1,9 @@
 use core::prelude;
+use std::mem;
 
 use crate::ast::*;
 
-trait Visitor {
+pub trait Visitor {
     fn visit_stylesheets(&mut self, stylesheets: &mut Stylesheets) {
         for content in &mut stylesheets.content {
             self.visit_style_content(content);
@@ -118,13 +119,25 @@ trait Visitor {
     fn visit_defined_statement(&mut self, defined_statement: &mut DefinedStatement) {}
 }
 
+impl AstVisitor {
+    fn get_simple_selector_name(&mut self, simple_selector: &mut SimpleSelector) -> String {
+        mem::take(&mut simple_selector.name)
+    }
+}
+
 struct AstVisitor;
 impl Visitor for AstVisitor {
+
     fn visit_selector(&mut self, mut selector: &mut Selector) {
         if let Selector::SimpleSelector(simple_selector) = selector {
+            let mut old_name = self.get_simple_selector_name(simple_selector);
+            old_name.insert_str(0, "hello");
             simple_selector.name = "b".to_string();
+            dbg!(old_name, &simple_selector.name);
         }
     }
+
+  
 }
 
 #[test]

@@ -1,7 +1,6 @@
 use less_lexer::token::Token;
 use serde::{Deserialize, Serialize};
 
-
 pub type Atom = String;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,13 +25,17 @@ pub struct QualifiedRule {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AtRule {
-    pub span: Span,
+    // todo span
     pub name: AtKeyword,
-    pub prelude: Vec<AtRulePrelude>,
+    pub prelude: VariableValueList,
     pub block: Option<CurlyBracketsBlock>,
 }
 
-pub type AtRulePrelude = Express;
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParenthesesBlock(Vec<PreservedToken>);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BracketsBlock(Vec<PreservedToken>);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DefinedStatement {
@@ -43,16 +46,15 @@ pub enum DefinedStatement {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MixinDefined {
-    pub span: Span,
     pub name: SimpleSelector,
     pub params: Vec<Param>,
+    pub block: CurlyBracketsBlock,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Param {
-    pub pan: Span,
-    pub name: Ident,
-    pub value: ComponentValueList,
+    pub name: AtKeyword,
+    pub default_params: Option<VariableValueList>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,7 +72,6 @@ pub enum VariableDefinedValue {
     Ident(Ident),
     PreservedToken(PreservedToken),
 }
-
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MapVariableDefined {
@@ -109,6 +110,13 @@ pub enum ComponentValue {
     SelectorList(SelectorList),
     Express(Express),
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MixinCall {
+    pub name: SelectorComponentList,
+    pub params: VariableValueList,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 
 pub struct FunctionDefinition {
@@ -122,15 +130,24 @@ pub struct FunctionDefinition {
 pub enum Express {
     BinaryExpression(BinaryExpression),
     FunctionExpression(FunctionExpression),
+    MixinCall(MixinCall),
     VariableExpression(VariableExpression),
     ParenthesesExpression(Box<Express>),
+    StringEscape(StringLiteral),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 
 pub enum VariableExpression {
-    Variable(Ident),
+    Variable(AtKeyword),
+    MapVariable(MapVariable),
     Color(Color),
     PreservedToken(PreservedToken),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MapVariable {
+    pub property: Ident,
+    pub object: Box<Express>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,7 +160,7 @@ pub struct Color {
 
 pub struct FunctionExpression {
     pub name: Ident,
-    pub params: Vec<Express>,
+    pub params: VariableValueList,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

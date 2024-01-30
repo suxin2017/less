@@ -34,10 +34,6 @@ name = "less-error"
 version = "0.1.0"
 
 [[package]]
-name = "less-formater"
-version = "0.1.0"
-
-[[package]]
 name = "less-lexer"
 version = "0.1.0"
 dependencies = [
@@ -66,10 +62,11 @@ name = "less-test-data"
 version = "0.1.0"
 
 [[package]]
-name = "less-visit"
+name = "less-to-css"
 version = "0.1.0"
 dependencies = [
  "less-ast",
+ "less-parser",
 ]
 
 [[package]]

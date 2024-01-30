@@ -10,10 +10,11 @@ edition = "2021"
 members = [
     "less-ast",
     "less-error",
-    "less-formater",
+    "less-to-css",
     "less-lexer",
     "less-macro",
-    "less-parser", "less-test-data", "less-visit",
+    "less-parser",
+    "less-test-data",
     "less-wasm",
 ]
 

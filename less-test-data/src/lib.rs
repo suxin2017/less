@@ -14,7 +14,10 @@ fn feature() {
 }
 
 pub fn read_test_file(sub_path: &str) -> String {
-    let mut path = PathBuf::from("test-data/less");
+    dbg!();
+    let root_path = env!("CARGO_MANIFEST_DIR");
+    let mut path = PathBuf::from(root_path);
+    path.push("test-data/less");
     path.push(sub_path);
     fs::read_to_string(path).unwrap()
 }

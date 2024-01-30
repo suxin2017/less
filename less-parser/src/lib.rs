@@ -1,10 +1,11 @@
 use less_ast::ast::{
     AtKeyword, AtRule, Atom, BinaryExpression, BinaryOperator, ComponentValue, ComponentValueList,
     CurlyBracketsBlock, CurlyBracketsBlockContent, Declaration, DeclarationList, DefinedStatement,
-    Express, Ident, LexerToken, MapVariableDefined, NumberLiteral, PreservedToken, PseudoElement,
-    PseudoFunction, PseudoSelector, QualifiedRule, Selector, SelectorComponentList, SelectorList,
-    SimpleSelector, Span, StringLiteral, StyleContent, Stylesheets, VariableDefined,
-    VariableDefinedValue, VariableExpression, VariableValueList,
+    Express, FunctionExpression, Ident, LexerToken, MapVariable, MapVariableDefined, MixinCall,
+    MixinDefined, NumberLiteral, Param, PreservedToken, PseudoElement, PseudoFunction,
+    PseudoSelector, QualifiedRule, Selector, SelectorComponentList, SelectorList, SimpleSelector,
+    Span, StringLiteral, StyleContent, Stylesheets, VariableDefined, VariableDefinedValue,
+    VariableExpression, VariableValueList,
 };
 use less_lexer::{
     token::{Kind, Token},
@@ -113,9 +114,18 @@ impl<'source> Parser<'source> {
                 }
                 _ => {
                     if self.is_at_selector_component() {
+                        self.lexer.start();
+                        if let Ok(mixin_defined) = self.try_parse_mixin_defined() {
+                            content.push(StyleContent::DefinedStatement(
+                                DefinedStatement::MixinDefined(mixin_defined),
+                            ));
+                            continue;
+                        } else {
+                            self.lexer.restore();
+                        }
                         let rule = self.parse_rule()?;
                         content.push(StyleContent::QualifiedRule(rule));
-                        break;
+                        continue;
                     }
                     trace!("unexpected token");
                     return Err(ParserError::UnexpectedToken(self.next_token()?));
@@ -129,7 +139,19 @@ impl<'source> Parser<'source> {
     }
 
     fn parse_at_rule(&mut self) -> Result<AtRule, ParserError> {
-        todo!()
+        let name = self.parse_at_keyword()?;
+        let prelude = self.parse_value_list()?;
+        let block = if self.is_at_semicolon() {
+            None
+        } else {
+            Some(self.parse_block()?)
+        };
+
+        return Ok(AtRule {
+            name,
+            prelude,
+            block,
+        });
     }
 
     fn is_at_defined_statement(&mut self) -> bool {
@@ -189,6 +211,57 @@ impl<'source> Parser<'source> {
             span: Span::new(start, end),
         })
     }
+    fn is_at_mixin_name(&mut self) -> bool {
+        self.is_at_dot() || self.is_at_hash()
+    }
+
+    fn parse_mixin_name(&mut self) -> Result<SimpleSelector, ParserError> {
+        let start = self.next_token()?;
+        let end = self.parse_ident()?;
+        Ok(SimpleSelector {
+            name: self.get_atom_by_span(start.start, end.span.end),
+            span: Span::new(start.start, end.span.end),
+        })
+    }
+    fn try_parse_mixin_defined(&mut self) -> Result<MixinDefined, ParserError> {
+        let name = self.parse_mixin_name()?;
+        self.skip_whitespace();
+        self.expect(Kind::LeftParen)?;
+        let params = self.parse_mixin_param_list()?;
+        self.skip_whitespace();
+        self.expect(Kind::RightParen)?;
+        self.skip_whitespace();
+        self.expect(Kind::LeftBrace)?;
+        let block = self.parse_block()?;
+        self.expect(Kind::RightBrace)?;
+        Ok(MixinDefined {
+            name,
+            params,
+            block,
+        })
+    }
+
+    fn is_at_param(&mut self) -> bool {
+        self.is_at_at_keyword()
+    }
+    fn parse_mixin_param_list(&mut self) -> Result<Vec<Param>, ParserError> {
+        let mut params = Vec::new();
+        while !self.is_at_right_parent() {
+            let name = self.parse_at_keyword()?;
+            let default_params = if self.is_at_colon() {
+                self.expect(Kind::Colon)?;
+                Some(self.parse_value_list()?)
+            } else {
+                None
+            };
+
+            params.push(Param {
+                name,
+                default_params,
+            })
+        }
+        Ok(params)
+    }
     fn is_at_ampersand(&mut self) -> bool {
         if let Ok(token) = self.peek_token() {
             return matches!(token.kind, Kind::Ampersand);
@@ -228,7 +301,13 @@ impl<'source> Parser<'source> {
     fn parse_prelude_component(&mut self) -> Result<SelectorComponentList, ParserError> {
         let mut prelude = Vec::new();
         // , { }
-        while !self.is_at_semicolon() && !self.is_at_left_brace() && !self.is_at_right_brace() {
+        // mixin()
+        while !self.is_at_semicolon()
+            && !self.is_at_left_brace()
+            && !self.is_at_right_brace()
+            && !self.is_at_left_parent()
+            && !self.is_at_right_parent()
+        {
             let component = self.parse_selector_component()?;
             prelude.push(component);
         }
@@ -312,7 +391,8 @@ impl<'source> Parser<'source> {
             || self.is_at_colon()
             || self.is_at_hash()
             || self.is_at_ident()
-            || self.is_at_number();
+            || self.is_at_number()
+            || self.is_at_dot();
     }
 
     // const re = /^[#.](?:[\w-]|\\(?:[A-Fa-f0-9]{1,6} ?|[^A-Fa-f0-9]))+/;
@@ -348,6 +428,14 @@ impl<'source> Parser<'source> {
         } else if self.is_at_hash() {
             trace!("parse_element");
             let start_token = self.expect(Kind::Hash)?;
+            let end_token = self.parse_element()?;
+            return Ok(Selector::SimpleSelector(SimpleSelector {
+                name: self.get_atom_by_span(start_token.start, end_token.end),
+                span: Span::new(start_token.start, end_token.end),
+            }));
+        } else if self.is_at_dot() {
+            trace!("parse_element");
+            let start_token = self.expect(Kind::Dot)?;
             let end_token = self.parse_element()?;
             return Ok(Selector::SimpleSelector(SimpleSelector {
                 name: self.get_atom_by_span(start_token.start, end_token.end),
@@ -402,10 +490,17 @@ impl<'source> Parser<'source> {
         }
         false
     }
+    fn is_at_left_curly_bracket(&mut self) -> bool {
+        if let Ok(token) = self.peek_token() {
+            return matches!(token.kind, Kind::LeftBracket);
+        }
+        false
+    }
     fn try_parse_declaration(&mut self) -> Result<DeclarationList, ParserError> {
         trace!("try_parse_declaration");
         let mut declaration_list = Vec::new();
-        while !self.is_at_right_curly_bracket() {
+        // { }
+        while !self.is_at_right_curly_bracket() || !self.is_at_left_curly_bracket() {
             self.lexer.start();
             let name = self.expect_skit_whitespace(Kind::Ident)?;
             if self.is_at_colon() {
@@ -450,22 +545,46 @@ impl<'source> Parser<'source> {
                 }
                 Kind::Ident => {
                     trace!("parse_block: Ident");
+                    let declaration = self.try_parse_declaration()?;
+                    content.push(CurlyBracketsBlockContent::DeclarationList(declaration));
+                    dbg!("here");
                     self.lexer.start();
-                    if let Ok(declaration) = self.try_parse_declaration() {
-                        content.push(CurlyBracketsBlockContent::DeclarationList(declaration));
+                    if let Ok(mixin_defined) = self.try_parse_mixin_defined() {
+                        content.push(CurlyBracketsBlockContent::DefinedStatement(
+                            DefinedStatement::MixinDefined(mixin_defined),
+                        ));
                         continue;
                     } else {
                         self.lexer.restore();
                     }
-                    let rule = self.parse_rule()?;
-                    content.push(CurlyBracketsBlockContent::QualifiedRule(rule));
+                    if self.is_at_selector_component() {
+                        trace!("parse_block: Ident");
+                        let rule = self.parse_rule()?;
+                        content.push(CurlyBracketsBlockContent::QualifiedRule(rule));
+                    }
                 }
+
                 Kind::RightBrace => break,
                 Kind::Whitespace => {
                     self.next_token()?;
                 }
                 _ => {
-                    trace!("unexpected token: {:?}", token);
+                    if self.is_at_selector_component() {
+                        self.lexer.start();
+                        if let Ok(mixin_defined) = self.try_parse_mixin_defined() {
+                            content.push(CurlyBracketsBlockContent::DefinedStatement(
+                                DefinedStatement::MixinDefined(mixin_defined),
+                            ));
+                            continue;
+                        } else {
+                            dbg!("here?");
+                            self.lexer.restore();
+                        }
+                        let rule = self.parse_rule()?;
+                        content.push(CurlyBracketsBlockContent::QualifiedRule(rule));
+                        continue;
+                    }
+                    trace!("unexpected token");
                     return Err(ParserError::UnexpectedToken(self.next_token()?));
                 }
             }
@@ -563,7 +682,7 @@ impl<'source> Parser<'source> {
     fn parse_value_list(&mut self) -> Result<VariableValueList, ParserError> {
         let mut values = Vec::new();
         while self.is_at_value_defined_value() {
-            let value = self.value_defined_value()?;
+            let value = self.parse_value_list_item()?;
             values.push(value);
             if self.is_at_semicolon() {
                 break;
@@ -590,6 +709,12 @@ impl<'source> Parser<'source> {
         }
         false
     }
+    fn is_at_tilde(&mut self) -> bool {
+        if let Ok(token) = self.peek_token() {
+            return matches!(token.kind, Kind::Tilde);
+        }
+        false
+    }
 
     fn is_at_value_defined_value(&mut self) -> bool {
         return self.is_at_ident()
@@ -601,7 +726,10 @@ impl<'source> Parser<'source> {
             || self.is_at_plus()
             || self.is_at_minus()
             || self.is_at_asterisk()
-            || self.is_at_slash();
+            || self.is_at_slash()
+            || self.is_at_left_parent()
+            || self.is_at_tilde()
+            || self.is_at_selector_component();
     }
     fn is_at_plus(&mut self) -> bool {
         if let Ok(token) = self.peek_token() {
@@ -629,28 +757,47 @@ impl<'source> Parser<'source> {
     }
 
     // ident at-keyword string number
-    fn value_defined_value(&mut self) -> Result<VariableDefinedValue, ParserError> {
+    fn parse_value_list_item(&mut self) -> Result<VariableDefinedValue, ParserError> {
         if !self.is_at_value_defined_value() {
             trace!("unexpected token");
             return Err(ParserError::UnexpectedToken(self.next_token()?));
         }
         if self.is_at_ident() {
+            // a()
+            if let Ok(token) = self.peek_nth_token(1) {
+                if matches!(token.kind, Kind::LeftParen) {
+                    let express = self.try_parse_express()?;
+                    return Ok(VariableDefinedValue::Express(express));
+                }
+            }
+
             let ident = self.parse_ident()?;
             return Ok(VariableDefinedValue::PreservedToken(PreservedToken::Ident(
                 ident,
             )));
+        } else if self.is_at_dot() || self.is_at_hash() {
+            // may be mixin
+            self.lexer.start();
+            let express = self.try_parse_express();
+            if let Ok(express) = express {
+                return Ok(VariableDefinedValue::Express(express));
+            } else {
+                self.lexer.restore();
+            }
         } else if self.is_at_at_keyword() {
-            let keyword = self.parse_at_keyword()?;
-            return Ok(VariableDefinedValue::PreservedToken(
-                PreservedToken::AtKeyword(keyword),
-            ));
+            self.lexer.start();
+            let express = self.try_parse_express();
+            if let Ok(express) = express {
+                return Ok(VariableDefinedValue::Express(express));
+            } else {
+                self.lexer.restore();
+            }
         } else if self.is_at_string() {
             let string = self.parse_string_literal()?;
             return Ok(VariableDefinedValue::PreservedToken(
                 PreservedToken::String(string),
             ));
         } else if self.is_at_number() {
-            dbg!(&self.lexer.chars);
             self.lexer.start();
             let express = self.try_parse_express();
             if let Ok(express) = express {
@@ -662,15 +809,22 @@ impl<'source> Parser<'source> {
                     PreservedToken::Number(number),
                 ));
             }
-        } else {
-            let token = self.next_token()?;
-            return Ok(VariableDefinedValue::PreservedToken(PreservedToken::Token(
-                LexerToken {
-                    name: self.get_atom(&token),
-                    span: token.into(),
-                },
-            )));
+        } else if self.is_at_left_parent() {
+            self.lexer.start();
+            let express = self.try_parse_express();
+            if let Ok(express) = express {
+                return Ok(VariableDefinedValue::Express(express));
+            } else {
+                self.lexer.restore();
+            }
         }
+        let token = self.next_token()?;
+        return Ok(VariableDefinedValue::PreservedToken(PreservedToken::Token(
+            LexerToken {
+                name: self.get_atom(&token),
+                span: token.into(),
+            },
+        )));
     }
 
     fn try_parse_express(&mut self) -> Result<Express, ParserError> {
@@ -730,6 +884,13 @@ impl<'source> Parser<'source> {
         }
         return Ok(cur);
     }
+
+    fn is_at_left_bracket(&mut self) -> bool {
+        if let Ok(token) = self.peek_token() {
+            return matches!(token.kind, Kind::LeftBracket);
+        }
+        false
+    }
     fn try_parse_factory(&mut self) -> Result<Express, ParserError> {
         let token = self.peek_token()?;
         match token.kind {
@@ -738,6 +899,58 @@ impl<'source> Parser<'source> {
                 return Ok(Express::VariableExpression(
                     VariableExpression::PreservedToken(PreservedToken::Number(number)),
                 ));
+            }
+            Kind::AtKeyword => {
+                let keyword = self.parse_at_keyword()?;
+                // @x[][][]
+                if self.is_at_left_bracket() {
+                    self.expect(Kind::LeftBracket)?;
+                    self.skip_whitespace();
+                    let object = Express::VariableExpression(VariableExpression::Variable(keyword));
+                    let map_variable = MapVariable {
+                        object: Box::new(object),
+                        property: self.parse_ident()?,
+                    };
+                    self.expect(Kind::RightBracket)?;
+                    return Ok(Express::VariableExpression(
+                        VariableExpression::MapVariable(map_variable),
+                    ));
+                }
+                return Ok(Express::VariableExpression(VariableExpression::Variable(
+                    keyword,
+                )));
+            }
+            Kind::Ident => {
+                let name = self.parse_ident()?;
+                self.expect(Kind::LeftParen)?;
+                self.skip_whitespace();
+                let express = self.parse_value_list()?;
+                self.expect(Kind::RightParen)?;
+                self.skip_whitespace();
+                return Ok(Express::FunctionExpression(FunctionExpression {
+                    name,
+                    params: express,
+                }));
+            }
+            Kind::Dot | Kind::Hash => {
+                dbg!("here");
+                let name = self.parse_prelude_component()?;
+                self.expect(Kind::LeftParen)?;
+                self.skip_whitespace();
+                let express = self.parse_value_list()?;
+                self.expect(Kind::RightParen)?;
+                self.skip_whitespace();
+                return Ok(Express::MixinCall(MixinCall {
+                    name,
+                    params: express,
+                }));
+            }
+            // ~"string"
+            Kind::Tilde => {
+                self.expect(Kind::Tilde)?;
+                self.skip_whitespace();
+                let express = self.parse_string_literal()?;
+                return Ok(Express::StringEscape(express));
             }
             Kind::LeftParen => {
                 self.expect(Kind::LeftParen)?;
@@ -763,8 +976,55 @@ fn quick_test() {
         simplelog::ColorChoice::Auto,
     );
     let source = r#"
-@color : 2 *; 
-
+    
+    @val: 10px;
+    .no-math {
+      @c: 10px + 20px;
+      @calc: (@val + 30px);
+      root: calc(100% - @c);
+      root2: calc(100% - @calc);
+      @var: 50vh/2;
+      width: calc(50% + (@var - 20px));
+      height: calc(50% + ((@var - 20px)));
+      min-height: calc(((10vh)) + calc((5vh)));
+      foo: 1 + 2 calc(3 + 4) 5 + 6;
+      @floor: floor(1 + .1);
+      bar: calc(@floor + 20%);
+    }
+    
+    .b {
+      @a: 10px;
+      @b: 10px;
+    
+      one: calc(100% - ((min(@a + @b))));
+      two: calc(100% - (((@a + @b))));
+      three: calc(e('100%') - (3 * 1));
+      four: calc(~'100%' - (3 * 1));
+      nested: calc(calc(2.25rem + 2px) - 1px * 2);
+    }
+    
+    .c {
+      @v: 10px;
+      height: calc(100% - ((@v * 3) + (@v * 2)));
+    }
+    
+    .correctly-exit-calc-mode {
+        @a: 10;
+        h2 { width: unit(@a, px); }
+    
+        div { width: calc(100px * 2); }
+    
+        .mk-map() {
+            text: white;
+            background: black;
+        }
+    
+        @p: .mk-map();
+    
+        h1 { color: @p[text]; }
+    }
+    
+    
 "#;
     let mut parser = Parser::new(source);
     let result = parser.parse();

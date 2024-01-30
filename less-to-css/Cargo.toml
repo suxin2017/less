@@ -1,8 +1,10 @@
 [package]
-name = "less-formater"
+name = "less-to-css"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+less-parser = { path = "../less-parser" }
+less-ast = { path = "../less-ast" }
