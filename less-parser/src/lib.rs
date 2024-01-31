@@ -1,17 +1,17 @@
 use less_ast::ast::{
-    AtKeyword, AtRule, Atom, BinaryExpression, BinaryOperator, ComponentValue, ComponentValueList,
-    CurlyBracketsBlock, CurlyBracketsBlockContent, Declaration, DeclarationList, DefinedStatement,
-    Express, FunctionExpression, Ident, LexerToken, MapVariable, MapVariableDefined, MixinCall,
-    MixinDefined, NumberLiteral, Param, PreservedToken, PseudoElement, PseudoFunction,
-    PseudoSelector, QualifiedRule, Selector, SelectorComponentList, SelectorList, SimpleSelector,
-    Span, StringLiteral, StyleContent, Stylesheets, VariableDefined, VariableDefinedValue,
-    VariableExpression, VariableValueList,
+    AtKeyword, AtRule, Atom, BinaryExpression, BinaryOperator, Color, ComponentValue,
+    ComponentValueList, CurlyBracketsBlock, CurlyBracketsBlockContent, Declaration,
+    DeclarationList, DefinedStatement, Express, FunctionExpression, Ident, LexerToken, MapVariable,
+    MapVariableDefined, MixinCall, MixinDefined, NumberLiteral, Param, PreservedToken,
+    PseudoElement, PseudoFunction, PseudoSelector, QualifiedRule, Selector, SelectorComponentList,
+    SelectorList, SimpleSelector, Span, StringLiteral, StyleContent, Stylesheets, VariableDefined,
+    VariableDefinedValue, VariableExpression, VariableValueList,
 };
 use less_lexer::{
-    token::{Kind, Token},
+    token::{self, Kind, Token},
     Lexer,
 };
-use less_test_data::read_test_file;
+use less_test_data::{read_test_file, test_main_less_feature};
 use log::{debug, error, info, trace};
 use simplelog::{Config, TermLogger};
 use std::backtrace::Backtrace;
@@ -61,14 +61,16 @@ impl<'source> Parser<'source> {
     pub fn peek_nth_token(&mut self, n: usize) -> Result<&Token, ParserError> {
         Ok(self.lexer.peek_nth(n)?)
     }
+    pub fn peek_nth_token_str(&mut self, n: usize) -> Result<&str, ParserError> {
+        let token = self.lexer.peek_nth(n)?;
+        Ok(&self.source[token.start..token.end])
+    }
 
     pub fn expect(&mut self, kind: Kind) -> Result<Token, ParserError> {
         let token = self.next_token()?;
         if token.kind == kind {
             Ok(token)
         } else {
-            let b = Backtrace::capture();
-            println!("{}", b);
             trace!("expect: {:?},but found {:?}", kind, token);
             Err(ParserError::UnexpectedToken(token))
         }
@@ -86,6 +88,9 @@ impl<'source> Parser<'source> {
     }
     pub fn get_atom(&self, token: &Token) -> Atom {
         self.source[token.start..token.end].to_string()
+    }
+    pub fn get_source_sub_str(&self, start: usize, end: usize) -> &str {
+        &self.source[start..end]
     }
     pub fn get_atom_by_span(&self, start: usize, end: usize) -> Atom {
         self.source[start..end].to_string()
@@ -105,6 +110,8 @@ impl<'source> Parser<'source> {
                         content.push(StyleContent::DefinedStatement(statement));
                     } else {
                         let rule = self.parse_at_rule()?;
+                        dbg!(&rule);
+
                         content.push(StyleContent::AtRule(rule));
                     }
                 }
@@ -142,6 +149,7 @@ impl<'source> Parser<'source> {
         let name = self.parse_at_keyword()?;
         let prelude = self.parse_value_list()?;
         let block = if self.is_at_semicolon() {
+            self.expect(Kind::Semicolon)?; // skip ;
             None
         } else {
             Some(self.parse_block()?)
@@ -580,11 +588,14 @@ impl<'source> Parser<'source> {
                         }
                         self.lexer.start();
                         if let Ok(mixin_call) = self.try_parse_mixin_call() {
+                            dbg!(&mixin_call);
+                            self.expect(Kind::Semicolon);
                             content.push(CurlyBracketsBlockContent::MixinCall(mixin_call));
                             continue;
                         } else {
                             self.lexer.restore();
                         }
+                        dbg!("rule");
 
                         let rule = self.parse_rule()?;
                         content.push(CurlyBracketsBlockContent::QualifiedRule(rule));
@@ -662,6 +673,8 @@ impl<'source> Parser<'source> {
     }
     fn parse_value_defined(&mut self, name: Token) -> Result<VariableDefined, ParserError> {
         let value = self.parse_value_list()?;
+        dbg!(&value);
+        dbg!(self.peek_token());
         self.expect(Kind::Semicolon)?;
         Ok(VariableDefined {
             name: AtKeyword {
@@ -928,7 +941,6 @@ impl<'source> Parser<'source> {
             let express = self.parse_value_list()?;
             self.expect(Kind::RightParen)?;
             self.skip_whitespace();
-            self.expect(Kind::Semicolon)?;
             return Ok(MixinCall {
                 name,
                 params: Some(express),
@@ -936,6 +948,26 @@ impl<'source> Parser<'source> {
         }
         self.expect(Kind::Semicolon)?;
         return Ok(MixinCall { name, params: None });
+    }
+
+    fn is_at_color(&mut self) -> bool {
+        if let Ok(token) = self.peek_token() {
+            if matches!(token.kind, Kind::Hash) {
+                if let Ok(token) = self.peek_nth_token(1) {
+                    if matches!(token.kind, Kind::Ident | Kind::Number) {
+                        let token_len = token.end - token.start;
+                        if token_len > 0 && token_len <= 8 {
+                            let token_str = self.peek_nth_token_str(1).unwrap();
+                            return token_str.chars().all(|c| match c {
+                                'a'..='f' | 'A'..='F' | '0'..='9' => true,
+                                _ => false,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        false
     }
     fn try_parse_factory(&mut self) -> Result<Express, ParserError> {
         let token = self.peek_token()?;
@@ -979,6 +1011,18 @@ impl<'source> Parser<'source> {
                 }));
             }
             Kind::Dot | Kind::Hash => {
+                dbg!(self.is_at_color());
+                if self.is_at_color() {
+                    let start = self.expect(Kind::Hash)?;
+                    dbg!(self.peek_nth_token_str(0).unwrap());
+                    let end = self.next_token()?;
+                    return Ok(Express::VariableExpression(VariableExpression::Color(
+                        Color {
+                            value: self.get_atom_by_span(start.start, end.end),
+                            span: Span::new(start.start, end.end),
+                        },
+                    )));
+                }
                 let express = self.try_parse_mixin_call()?;
                 return Ok(Express::MixinCall(express));
             }
@@ -1014,15 +1058,33 @@ fn quick_test() {
         simplelog::ColorChoice::Auto,
     );
     let source = r#"
-    .test-rulePollution {
-        .polluteMixin();
-    }
-    
-    
+   
+      #overflow {
+        .d { color: (#00ee00 + #009900); } // #00ff00
+      }
+     
 "#;
     let mut parser = Parser::new(source);
     let result = parser.parse();
     println!("{:#?}", result);
+    match result {
+        Result::Err(e) => match e {
+            ParserError::LexerError(e) => {
+                error!("lexer error: {:?}", e);
+            }
+            ParserError::UnexpectedToken(token) => {
+                error!("parse error: {:?}", token);
+                if token.start > 5 && token.end < source.len() - 5 {
+                    let token = parser.source[token.start - 5..].to_string();
+                    error!("error at {}", token);
+                }
+            }
+            ParserError::ParseNUmberError(e) => {
+                error!("parse error: {:?}", e);
+            }
+        },
+        _ => {}
+    }
 }
 
 #[test]
@@ -1031,4 +1093,36 @@ fn quick_less_test() {
     let mut parser = Parser::new(&code);
     let result = parser.parse();
     println!("{:#?}", result);
+}
+
+#[test]
+fn test_main_less() {
+    test_main_less_feature(|path, content| {
+        let mut parser = Parser::new(content);
+        let result = parser.parse();
+        match result {
+            Ok(ast) => {
+                println!("{:#?}", ast);
+                return Ok(());
+            }
+            Err(e) => match e {
+                ParserError::LexerError(e) => {
+                    println!("error occur: {:?}", path);
+                    error!("lexer error: {:?}", e);
+                    return Err(());
+                }
+                ParserError::UnexpectedToken(token) => {
+                    println!("error occur: {:?}", path);
+                    error!("parse error: {:?}", token);
+                    error!("error at {}", content[token.start..token.end].to_string());
+                    return Err(());
+                }
+                ParserError::ParseNUmberError(e) => {
+                    println!("error occur: {:?}", path);
+                    error!("parse error: {:?}", e);
+                    return Err(());
+                }
+            },
+        }
+    })
 }

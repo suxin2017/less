@@ -24,11 +24,23 @@ enum NumberContext {
     Dot,
     Plus,
     Minus,
+    Zero,
 }
 #[derive(Debug, PartialEq, Eq)]
 enum StringContext {
     Single,
     Double,
+}
+
+//TODO: we need a context to handle different situation
+// 1. we need to eat 0-9a-fA-f min length 3 max length 6 when we meet #
+// 2. we need to skip whitespace when we meet selector
+enum LexerContext {
+    // we only eat 0-9a-fA-f min length 3 max length 6
+    Color,
+    // skip whitespace when selector
+    Selector,
+    Normal,
 }
 
 #[derive(Debug)]
@@ -130,6 +142,9 @@ impl<'source> Lexer<'source> {
                     return self.parse_number_token(pos, NumberContext::Minus);
                 }
                 _ if ch.is_ascii_digit() => {
+                    if ch == '0' {
+                        return self.parse_number_token(pos, NumberContext::Zero);
+                    }
                     return self.parse_number_token(pos, NumberContext::Normal);
                 }
                 '*' => {
@@ -321,13 +336,20 @@ impl<'source> Lexer<'source> {
     ) -> Result<Token, LexerError> {
         let mut current_number_context = number_context;
         let mut end_pos = start + 1;
+
         while let Some((pos, ch)) = self.peek_char() {
             match ch {
                 _ if ch.is_ascii_digit() => {
+                    if matches!(current_number_context, NumberContext::Zero) && ch == '0' {
+                        break;
+                    }
                     self.advance();
                 }
                 '.' => {
-                    if matches!(current_number_context, NumberContext::Normal) {
+                    if matches!(
+                        current_number_context,
+                        NumberContext::Normal | NumberContext::Zero
+                    ) {
                         current_number_context = NumberContext::Dot;
                         self.advance();
                         continue;
@@ -345,7 +367,9 @@ impl<'source> Lexer<'source> {
             return Ok(Token::new(Kind::Number, start, end_pos));
         }
         match current_number_context {
-            NumberContext::Normal => return Ok(Token::new(Kind::Number, start, end_pos)),
+            NumberContext::Normal | NumberContext::Zero => {
+                return Ok(Token::new(Kind::Number, start, end_pos))
+            }
             NumberContext::Dot => return Ok(Token::new(Kind::Dot, start, end_pos)),
             NumberContext::Plus => return Ok(Token::new(Kind::Plus, start, end_pos)),
             NumberContext::Minus => return Ok(Token::new(Kind::Minus, start, end_pos)),
@@ -491,7 +515,8 @@ fn number() {
 .1
 .
 +
--"#;
+-
+00"#;
     let mut lex = Lexer::new(code);
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Number, 1, 2)));
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Number, 3, 6)));
@@ -501,7 +526,9 @@ fn number() {
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Dot, 16, 17)));
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Plus, 18, 19)));
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Minus, 20, 21)));
-    assert_eq!(lex.get_token(), Ok(Token::new(Kind::EOF, 21, 21)));
+    assert_eq!(lex.get_token(), Ok(Token::new(Kind::Number, 22, 23)));
+    assert_eq!(lex.get_token(), Ok(Token::new(Kind::Number, 23, 24)));
+    assert_eq!(lex.get_token(), Ok(Token::new(Kind::EOF, 24, 24)));
 }
 
 #[test]
@@ -682,5 +709,20 @@ a  b c
 
 #[test]
 fn quick_test() {
-    println!("\\");
+    let code = r#"
+    #00ee00
+    #009900
+    "#;
+    let mut lex = Lexer::new(code);
+    loop {
+        let token = lex.get_token().unwrap();
+        if matches!(token.kind, Kind::Whitespace) {
+            continue;
+        }
+        if matches!(token.kind, Kind::EOF) {
+            break;
+        }
+        dbg!(code[token.start..token.end].to_string());
+        dbg!(token);
+    }
 }
