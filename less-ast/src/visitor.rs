@@ -18,6 +18,7 @@ pub trait Visitor {
             StyleContent::DefinedStatement(defined_statement) => {
                 self.visit_defined_statement(defined_statement)
             }
+            StyleContent::MixinCall(mixin_call) => todo!(),
         }
     }
 
@@ -48,6 +49,9 @@ pub trait Visitor {
             }
             CurlyBracketsBlockContent::DefinedStatement(defined_statement) => {
                 self.visit_defined_statement(defined_statement);
+            }
+            CurlyBracketsBlockContent::MixinCall(mixin_call) => {
+                todo!();
             }
         }
     }

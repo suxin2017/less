@@ -14,7 +14,10 @@ pub enum StyleContent {
     QualifiedRule(QualifiedRule),
     AtRule(AtRule),
     DefinedStatement(DefinedStatement),
+    MixinCall(MixinCall),
 }
+
+
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QualifiedRule {
@@ -70,6 +73,7 @@ pub enum VariableDefinedValue {
     // 1 + 2
     Express(Express),
     Ident(Ident),
+    Important(Ident),
     PreservedToken(PreservedToken),
 }
 
@@ -102,6 +106,7 @@ pub enum CurlyBracketsBlockContent {
     AtRule(AtRule),
     DefinedStatement(DefinedStatement),
     DeclarationList(DeclarationList),
+    MixinCall(MixinCall),
 }
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 
@@ -111,10 +116,12 @@ pub enum ComponentValue {
     Express(Express),
 }
 
+// .a;
+// .a();
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MixinCall {
     pub name: SelectorComponentList,
-    pub params: VariableValueList,
+    pub params: Option<VariableValueList>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

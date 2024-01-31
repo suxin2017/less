@@ -201,7 +201,6 @@ impl<'source> Parser<'source> {
         let start = self.peek_token()?.start;
 
         let prelude = self.parse_prelude()?;
-        dbg!(&prelude);
         self.expect(Kind::LeftBrace)?;
         let block = self.parse_block()?;
         let end = self.expect(Kind::RightBrace)?.end;
@@ -307,6 +306,7 @@ impl<'source> Parser<'source> {
             && !self.is_at_right_brace()
             && !self.is_at_left_parent()
             && !self.is_at_right_parent()
+            && !self.is_at_comma()
         {
             let component = self.parse_selector_component()?;
             prelude.push(component);
@@ -503,8 +503,10 @@ impl<'source> Parser<'source> {
         while !self.is_at_right_curly_bracket() || !self.is_at_left_curly_bracket() {
             self.lexer.start();
             let name = self.expect_skit_whitespace(Kind::Ident)?;
+            self.skip_whitespace();
             if self.is_at_colon() {
                 self.expect_skit_whitespace(Kind::Colon)?;
+                self.skip_whitespace();
                 let value = self.parse_value_list()?;
 
                 // the next token should have three result
@@ -525,7 +527,6 @@ impl<'source> Parser<'source> {
                 break;
             }
         }
-        dbg!(&declaration_list);
         return Ok(declaration_list);
     }
 
@@ -544,10 +545,8 @@ impl<'source> Parser<'source> {
                     }
                 }
                 Kind::Ident => {
-                    trace!("parse_block: Ident");
                     let declaration = self.try_parse_declaration()?;
                     content.push(CurlyBracketsBlockContent::DeclarationList(declaration));
-                    dbg!("here");
                     self.lexer.start();
                     if let Ok(mixin_defined) = self.try_parse_mixin_defined() {
                         content.push(CurlyBracketsBlockContent::DefinedStatement(
@@ -577,9 +576,16 @@ impl<'source> Parser<'source> {
                             ));
                             continue;
                         } else {
-                            dbg!("here?");
                             self.lexer.restore();
                         }
+                        self.lexer.start();
+                        if let Ok(mixin_call) = self.try_parse_mixin_call() {
+                            content.push(CurlyBracketsBlockContent::MixinCall(mixin_call));
+                            continue;
+                        } else {
+                            self.lexer.restore();
+                        }
+
                         let rule = self.parse_rule()?;
                         content.push(CurlyBracketsBlockContent::QualifiedRule(rule));
                         continue;
@@ -729,7 +735,15 @@ impl<'source> Parser<'source> {
             || self.is_at_slash()
             || self.is_at_left_parent()
             || self.is_at_tilde()
-            || self.is_at_selector_component();
+            || self.is_at_selector_component()
+            || self.is_at_bang()
+            || self.is_at_equal();
+    }
+    fn is_at_equal(&mut self) -> bool {
+        if let Ok(token) = self.peek_token() {
+            return matches!(token.kind, Kind::Equals);
+        }
+        false
     }
     fn is_at_plus(&mut self) -> bool {
         if let Ok(token) = self.peek_token() {
@@ -756,13 +770,24 @@ impl<'source> Parser<'source> {
         false
     }
 
+    fn is_at_bang(&mut self) -> bool {
+        if let Ok(token) = self.peek_token() {
+            return matches!(token.kind, Kind::Bang);
+        }
+        false
+    }
+
     // ident at-keyword string number
     fn parse_value_list_item(&mut self) -> Result<VariableDefinedValue, ParserError> {
         if !self.is_at_value_defined_value() {
             trace!("unexpected token");
             return Err(ParserError::UnexpectedToken(self.next_token()?));
         }
-        if self.is_at_ident() {
+        if self.is_at_bang() {
+            self.expect(Kind::Bang)?;
+            let ident = self.parse_ident()?;
+            return Ok(VariableDefinedValue::Important(ident));
+        } else if self.is_at_ident() {
             // a()
             if let Ok(token) = self.peek_nth_token(1) {
                 if matches!(token.kind, Kind::LeftParen) {
@@ -891,6 +916,27 @@ impl<'source> Parser<'source> {
         }
         false
     }
+
+    fn is_at_mixin_call(&mut self) -> bool {
+        return self.is_at_selector_component();
+    }
+    fn try_parse_mixin_call(&mut self) -> Result<MixinCall, ParserError> {
+        let name = self.parse_prelude_component()?;
+        if self.is_at_left_parent() {
+            self.expect(Kind::LeftParen)?;
+            self.skip_whitespace();
+            let express = self.parse_value_list()?;
+            self.expect(Kind::RightParen)?;
+            self.skip_whitespace();
+            self.expect(Kind::Semicolon)?;
+            return Ok(MixinCall {
+                name,
+                params: Some(express),
+            });
+        }
+        self.expect(Kind::Semicolon)?;
+        return Ok(MixinCall { name, params: None });
+    }
     fn try_parse_factory(&mut self) -> Result<Express, ParserError> {
         let token = self.peek_token()?;
         match token.kind {
@@ -933,17 +979,8 @@ impl<'source> Parser<'source> {
                 }));
             }
             Kind::Dot | Kind::Hash => {
-                dbg!("here");
-                let name = self.parse_prelude_component()?;
-                self.expect(Kind::LeftParen)?;
-                self.skip_whitespace();
-                let express = self.parse_value_list()?;
-                self.expect(Kind::RightParen)?;
-                self.skip_whitespace();
-                return Ok(Express::MixinCall(MixinCall {
-                    name,
-                    params: express,
-                }));
+                let express = self.try_parse_mixin_call()?;
+                return Ok(Express::MixinCall(express));
             }
             // ~"string"
             Kind::Tilde => {
@@ -955,6 +992,7 @@ impl<'source> Parser<'source> {
             Kind::LeftParen => {
                 self.expect(Kind::LeftParen)?;
                 self.skip_whitespace();
+
                 let express = self.try_parse_express()?;
                 self.skip_whitespace();
                 self.expect(Kind::RightParen)?;
@@ -976,52 +1014,8 @@ fn quick_test() {
         simplelog::ColorChoice::Auto,
     );
     let source = r#"
-    
-    @val: 10px;
-    .no-math {
-      @c: 10px + 20px;
-      @calc: (@val + 30px);
-      root: calc(100% - @c);
-      root2: calc(100% - @calc);
-      @var: 50vh/2;
-      width: calc(50% + (@var - 20px));
-      height: calc(50% + ((@var - 20px)));
-      min-height: calc(((10vh)) + calc((5vh)));
-      foo: 1 + 2 calc(3 + 4) 5 + 6;
-      @floor: floor(1 + .1);
-      bar: calc(@floor + 20%);
-    }
-    
-    .b {
-      @a: 10px;
-      @b: 10px;
-    
-      one: calc(100% - ((min(@a + @b))));
-      two: calc(100% - (((@a + @b))));
-      three: calc(e('100%') - (3 * 1));
-      four: calc(~'100%' - (3 * 1));
-      nested: calc(calc(2.25rem + 2px) - 1px * 2);
-    }
-    
-    .c {
-      @v: 10px;
-      height: calc(100% - ((@v * 3) + (@v * 2)));
-    }
-    
-    .correctly-exit-calc-mode {
-        @a: 10;
-        h2 { width: unit(@a, px); }
-    
-        div { width: calc(100px * 2); }
-    
-        .mk-map() {
-            text: white;
-            background: black;
-        }
-    
-        @p: .mk-map();
-    
-        h1 { color: @p[text]; }
+    .test-rulePollution {
+        .polluteMixin();
     }
     
     
@@ -1033,7 +1027,7 @@ fn quick_test() {
 
 #[test]
 fn quick_less_test() {
-    let code = read_test_file("_main/calc.less");
+    let code = read_test_file("_main/variables.less");
     let mut parser = Parser::new(&code);
     let result = parser.parse();
     println!("{:#?}", result);

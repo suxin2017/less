@@ -1,7 +1,7 @@
-use std::{fmt::Write, path::Display};
+use std::{collections::HashMap, fmt::Write, path::Display};
 
 use less_ast::{
-    ast::{Atom, Stylesheets},
+    ast::{AtKeyword, Atom, ComponentValueList, Stylesheets},
     visitor::Visitor,
 };
 
@@ -19,6 +19,16 @@ impl<T: Write> Visitor for ToCss<T> {
     fn visit_stylesheets(&mut self, stylesheets: &mut Stylesheets) {
         self.fmt_ident("stylesheets".to_string());
     }
+}
+
+struct Context {
+    // collect current level all variables defined
+    // @a: 123;
+    // @a: {};
+    // #a(){}
+    // #namespace {}
+    symbol_table: HashMap<String, String>,
+    parent: Option<Box<Context>>
 }
 
 fn main() {

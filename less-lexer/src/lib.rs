@@ -377,18 +377,29 @@ impl<'source> Lexer<'source> {
         if !self.token_stash.is_empty() {
             return Ok(self.token_stash.pop_front().unwrap());
         }
-        let token = self.get_token()?;
-        return Ok(token);
+        loop {
+            let token = self.get_token()?;
+            if token.kind == Kind::Comment {
+                continue;
+            } else {
+                return Ok(token);
+            }
+        }
     }
 
     pub fn peek(&mut self) -> Result<&Token, LexerError> {
         if !self.token_stash.is_empty() {
             return Ok(self.token_stash.front().unwrap());
         }
-        let token = self.get_token()?;
-
-        self.token_stash.push_back(token);
-        return Ok(self.token_stash.front().unwrap());
+        loop {
+            let token = self.get_token()?;
+            if token.kind == Kind::Comment {
+                continue;
+            } else {
+                self.token_stash.push_back(token);
+                return Ok(self.token_stash.front().unwrap());
+            }
+        }
     }
 
     pub fn peek_nth(&mut self, n: usize) -> Result<&Token, LexerError> {
@@ -403,8 +414,15 @@ impl<'source> Lexer<'source> {
         };
 
         for _ in 0..=nth {
-            let token = self.get_token()?;
-            self.token_stash.push_back(token);
+            loop {
+                let token = self.get_token()?;
+                if token.kind == Kind::Comment {
+                    continue;
+                } else {
+                    self.token_stash.push_back(token);
+                    break;
+                }
+            }
         }
 
         return Ok(self.token_stash.get(n).unwrap());
