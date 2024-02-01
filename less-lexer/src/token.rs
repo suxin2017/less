@@ -16,6 +16,7 @@ pub enum Kind {
     String,
     Number,
     Comment,
+    Color,
 
     LeftParen,    // (
     RightParen,   // )
@@ -99,6 +100,7 @@ impl std::fmt::Display for Kind {
             Kind::Hash => write!(f, "Hash"),
             Kind::Dot => write!(f, "Dot"),
             Kind::Percent => write!(f, "Percent"),
+            Kind::Color => write!(f, "Color"),
         }
     }
 }

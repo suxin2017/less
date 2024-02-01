@@ -9,7 +9,7 @@ use less_ast::ast::{
 };
 use less_lexer::{
     token::{self, Kind, Token},
-    Lexer,
+    Lexer, LexerMode,
 };
 use less_test_data::{read_test_file, test_main_less_feature};
 use log::{debug, error, info, trace};
@@ -951,23 +951,22 @@ impl<'source> Parser<'source> {
     }
 
     fn is_at_color(&mut self) -> bool {
-        if let Ok(token) = self.peek_token() {
-            if matches!(token.kind, Kind::Hash) {
-                if let Ok(token) = self.peek_nth_token(1) {
-                    if matches!(token.kind, Kind::Ident | Kind::Number) {
-                        let token_len = token.end - token.start;
-                        if token_len > 0 && token_len <= 8 {
-                            let token_str = self.peek_nth_token_str(1).unwrap();
-                            return token_str.chars().all(|c| match c {
-                                'a'..='f' | 'A'..='F' | '0'..='9' => true,
-                                _ => false,
-                            });
-                        }
-                    }
-                }
+        self.lexer.start();
+        self.lexer.set_mode(LexerMode::Color);
+        let is_color = if let Ok(token) = self.peek_token() {
+            if let Ok(token) = self.peek_nth_token(1) {
+                matches!(token.kind, Kind::Color)
+            } else {
+                false
             }
+        } else {
+            false
+        };
+        if !is_color {
+            self.lexer.restore();
         }
-        false
+        self.lexer.set_mode(LexerMode::Normal);
+        is_color
     }
     fn try_parse_factory(&mut self) -> Result<Express, ParserError> {
         let token = self.peek_token()?;
@@ -1011,18 +1010,19 @@ impl<'source> Parser<'source> {
                 }));
             }
             Kind::Dot | Kind::Hash => {
-                dbg!(self.is_at_color());
-                if self.is_at_color() {
-                    let start = self.expect(Kind::Hash)?;
-                    dbg!(self.peek_nth_token_str(0).unwrap());
-                    let end = self.next_token()?;
-                    return Ok(Express::VariableExpression(VariableExpression::Color(
-                        Color {
-                            value: self.get_atom_by_span(start.start, end.end),
-                            span: Span::new(start.start, end.end),
-                        },
-                    )));
+                if self.is_at_hash() {
+                    if self.is_at_color() {
+                        let start = self.expect(Kind::Hash)?;
+                        let end = self.expect(Kind::Color)?;
+                        return Ok(Express::VariableExpression(VariableExpression::Color(
+                            Color {
+                                value: self.get_atom_by_span(start.start, end.end),
+                                span: Span::new(start.start, end.end),
+                            },
+                        )));
+                    }
                 }
+
                 let express = self.try_parse_mixin_call()?;
                 return Ok(Express::MixinCall(express));
             }
@@ -1058,10 +1058,109 @@ fn quick_test() {
         simplelog::ColorChoice::Auto,
     );
     let source = r#"
-   
-      #overflow {
-        .d { color: (#00ee00 + #009900); } // #00ff00
-      }
+    /******************\
+     *                  *
+     *  Comment Header  *
+     *                  *
+     \******************/
+     
+     /*
+     
+         Comment
+     
+     */
+     
+     /*
+      * Comment Test
+      *
+      * - cloudhead (http://cloudhead.net)
+      *
+      */
+     
+     ////////////////
+     @var: "content";
+     ////////////////
+     
+     /* Colors
+      * ------
+      *   #EDF8FC (background blue)
+      *   #166C89 (darkest blue)
+      *
+      * Text:
+      *   #333 (standard text) // A comment within a comment!
+      *   #1F9EC9 (standard link)
+      *
+      */
+     
+     /* @group Variables
+     ------------------- */
+     #comments /* boo *//* boo again*/,
+     //.commented_out1
+     //.commented_out2
+     //.commented_out3
+     .comments //end of comments1
+     //end of comments2
+     {
+       /**/ // An empty comment
+       color: red; /* A C-style comment */  /* A C-style comment */
+       background-color: orange; // A little comment
+       font-size: 12px;
+     
+       /* lost comment */ content: @var;
+     
+       border: 1px solid black;
+     
+       // padding & margin //
+       padding: 0; // }{ '"
+       margin: 2em;
+     } //
+     
+     /* commented out
+       #more-comments {
+         color: grey;
+       }
+     */
+     
+     .selector /* .with */, .lots, /* of */ .comments {
+       color/* survive */ /* me too */: grey, /* blue */ orange;
+       -webkit-border-radius: 2px /* webkit only */;
+       -moz-border-radius: (2px * 4) /* moz only with operation */;
+     }
+     
+     .mixin_def_with_colors(@a: white, // in
+            @b: 1px //put in @b - causes problems! --->
+            ) // the
+            when (@a = white) {
+         .test-rule {
+             color: @b;
+         }
+     }
+     .mixin_def_with_colors();
+     
+     // .s when
+     //R/2
+     
+     .sr-only-focusable {
+       clip: auto;
+     }
+     
+     @-webkit-keyframes /* Safari */ hover /* and Chrome */ {
+       0% {
+         color: red;
+       }
+     }
+     
+     #last { color: blue }
+     //
+     
+     /*  *//* { *//*  *//*  *//*  */#div { color:#A33; }/* } */
+     
+     // line immediately followed
+     /*by block */
+     @string_w_comment: ~"/* // Not commented out // */";
+     #output-block { comment: @string_w_comment; }
+     /*comment on last line*/
+      
      
 "#;
     let mut parser = Parser::new(source);

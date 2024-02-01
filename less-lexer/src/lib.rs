@@ -16,6 +16,8 @@ pub enum LexerError {
     UnexpectedToken(Kind),
     #[error("Unexpected char: {0}")]
     UnexpectedChar(char),
+    #[error("Parser color error")]
+    ParserColorError,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -35,7 +37,8 @@ enum StringContext {
 //TODO: we need a context to handle different situation
 // 1. we need to eat 0-9a-fA-f min length 3 max length 6 when we meet #
 // 2. we need to skip whitespace when we meet selector
-enum LexerContext {
+#[derive(Debug)]
+pub enum LexerMode {
     // we only eat 0-9a-fA-f min length 3 max length 6
     Color,
     // skip whitespace when selector
@@ -52,6 +55,8 @@ pub struct Lexer<'source> {
     pub chars: CharIndices<'source>,
 
     stack_charts: VecDeque<(CharIndices<'source>, VecDeque<Token>)>,
+
+    mode: LexerMode,
 }
 
 impl<'source> Lexer<'source> {
@@ -61,7 +66,12 @@ impl<'source> Lexer<'source> {
             token_stash: VecDeque::with_capacity(30),
             chars: source.char_indices(),
             stack_charts: VecDeque::with_capacity(20),
+            mode: LexerMode::Normal,
         }
+    }
+    pub fn set_mode(&mut self, mode: LexerMode) {
+        dbg!(&mode);
+        self.mode = mode;
     }
     pub fn advance(&mut self) -> Option<(usize, char)> {
         self.chars.next()
@@ -72,6 +82,9 @@ impl<'source> Lexer<'source> {
     }
     pub fn peek_char(&mut self) -> Option<(usize, char)> {
         self.chars.clone().next()
+    }
+    pub fn peek_nth_char(&mut self, n: usize) -> Option<(usize, char)> {
+        self.chars.clone().nth(n)
     }
     pub fn start(&mut self) {
         self.stack_charts
@@ -139,9 +152,23 @@ impl<'source> Lexer<'source> {
                     return self.parse_number_token(pos, NumberContext::Plus);
                 }
                 '-' => {
+                    if !matches!(self.peek_char(), Some((_, '0'..='9'))) {
+                        return self.parse_ident_token(pos);
+                    }
+                    if matches!(self.peek_char(), Some((_, '-')))
+                        && !matches!(self.peek_nth_char(1), Some((_, '0'..='9')))
+                    {
+                        return self.parse_ident_token(pos);
+                    }
                     return self.parse_number_token(pos, NumberContext::Minus);
                 }
                 _ if ch.is_ascii_digit() => {
+                    match self.mode {
+                        LexerMode::Color => {
+                            return self.parse_color(pos);
+                        }
+                        _ => {}
+                    }
                     if ch == '0' {
                         return self.parse_number_token(pos, NumberContext::Zero);
                     }
@@ -225,6 +252,14 @@ impl<'source> Lexer<'source> {
                     continue;
                 }
                 _ => {
+                    match self.mode {
+                        LexerMode::Color => {
+                            if self.is_at_color() {
+                                return self.parse_color(pos);
+                            }
+                        }
+                        _ => {}
+                    }
                     if Self::is_validate_ident(ch, false) {
                         return self.parse_ident_token(pos);
                     }
@@ -233,6 +268,31 @@ impl<'source> Lexer<'source> {
             }
         }
         Ok(Token::new(Kind::EOF, self.source.len(), self.source.len()))
+    }
+
+    fn parse_color(&mut self, start: usize) -> Result<Token, LexerError> {
+        let mut end_pos = start + 1;
+        let max_length = 8;
+        let min_length = 3;
+        let mut cur_length = 0;
+
+        while let Some((pos, ch)) = self.peek_char() {
+            match ch {
+                '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                    self.advance();
+                    cur_length += 1;
+                    continue;
+                }
+                _ => {
+                    end_pos = pos;
+                    break;
+                }
+            }
+        }
+        if cur_length >= min_length || cur_length <= max_length {
+            return Ok(Token::new(Kind::Color, start, end_pos));
+        }
+        return Err(LexerError::ParserColorError);
     }
 
     fn try_comment(&mut self, start: usize) -> Result<Token, LexerError> {
@@ -255,7 +315,12 @@ impl<'source> Lexer<'source> {
         }
         return Ok(Token::new(Kind::Slash, start, start + 1));
     }
-
+    fn is_at_color(&mut self) -> bool {
+        if let Some((_, ch)) = self.peek_char() {
+            return matches!(ch,'0'..='9' | 'a'..='f' | 'A'..='F');
+        }
+        false
+    }
     fn is_validate_ident(ch: char, in_ident: bool) -> bool {
         match ch {
             '_' => return true,
@@ -417,6 +482,14 @@ impl<'source> Lexer<'source> {
         }
         loop {
             let token = self.get_token()?;
+            match self.mode {
+                LexerMode::Selector => {
+                    if token.kind == Kind::Whitespace {
+                        continue;
+                    }
+                }
+                _ => {}
+            }
             if token.kind == Kind::Comment {
                 continue;
             } else {
@@ -440,6 +513,14 @@ impl<'source> Lexer<'source> {
         for _ in 0..=nth {
             loop {
                 let token = self.get_token()?;
+                match self.mode {
+                    LexerMode::Selector => {
+                        if token.kind == Kind::Whitespace {
+                            continue;
+                        }
+                    }
+                    _ => {}
+                }
                 if token.kind == Kind::Comment {
                     continue;
                 } else {
@@ -451,38 +532,6 @@ impl<'source> Lexer<'source> {
 
         return Ok(self.token_stash.get(n).unwrap());
     }
-
-    pub fn peek_skip_whitespace(&mut self) -> Result<&Token, LexerError> {
-        loop {
-            if !self.token_stash.is_empty() {
-                return Ok(self.token_stash.back().unwrap());
-            }
-            let token = self.get_token()?;
-
-            if token.kind == Kind::Whitespace {
-                continue;
-            }
-
-            self.token_stash.push_back(token);
-            return Ok(self.token_stash.back().unwrap());
-        }
-    }
-    pub fn next_skip_whitespace(&mut self) -> Result<Token, LexerError> {
-        loop {
-            if !self.token_stash.is_empty() {
-                return Ok(self.token_stash.pop_front().unwrap());
-            }
-            let token = self.get_token()?;
-
-            if token.kind == Kind::Whitespace {
-                continue;
-            }
-
-            return Ok(token);
-        }
-    }
-
-    pub fn eat() {}
 
     pub fn expect(kind: Kind) {}
 
@@ -538,13 +587,15 @@ a
 你好
 🚗
 👪
+--custom
 "#;
     let mut lex = Lexer::new(code);
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Ident, 1, 2)));
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Ident, 3, 9)));
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Ident, 10, 14)));
     assert_eq!(lex.get_token(), Ok(Token::new(Kind::Ident, 15, 19)));
-    assert_eq!(lex.get_token(), Ok(Token::new(Kind::EOF, 19, 19)));
+    assert_eq!(lex.get_token(), Ok(Token::new(Kind::Ident, 20, 28)));
+    assert_eq!(lex.get_token(), Ok(Token::new(Kind::EOF, 28, 28)));
 }
 
 #[test]
@@ -579,32 +630,6 @@ a b c
     assert_eq!(lex.next(), Ok(Token::new(Kind::Ident, 3, 4)));
     assert_eq!(lex.next(), Ok(Token::new(Kind::Whitespace, 4, 5)));
     assert_eq!(lex.next(), Ok(Token::new(Kind::Ident, 5, 6)));
-    assert_eq!(lex.next(), Ok(Token::new(Kind::EOF, 7, 7)));
-}
-
-#[test]
-fn next_and_peek_skip_whitespace() {
-    let code = r#"
-a b c
-"#;
-    let mut lex = Lexer::new(code);
-    assert_eq!(lex.next(), Ok(Token::new(Kind::Ident, 1, 2)));
-    assert_eq!(
-        lex.peek_skip_whitespace(),
-        Ok(&Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.peek_skip_whitespace(),
-        Ok(&Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.next_skip_whitespace(),
-        Ok(Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.next_skip_whitespace(),
-        Ok(Token::new(Kind::Ident, 5, 6))
-    );
     assert_eq!(lex.next(), Ok(Token::new(Kind::EOF, 7, 7)));
 }
 
@@ -649,51 +674,6 @@ fn string() {
 }
 
 #[test]
-fn start_and_restore() {
-    let code = r#"
-a b c
-    "#;
-    let mut lex = Lexer::new(code);
-    lex.start();
-    assert_eq!(lex.next(), Ok(Token::new(Kind::Ident, 1, 2)));
-    assert_eq!(
-        lex.peek_skip_whitespace(),
-        Ok(&Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.peek_skip_whitespace(),
-        Ok(&Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.next_skip_whitespace(),
-        Ok(Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.next_skip_whitespace(),
-        Ok(Token::new(Kind::Ident, 5, 6))
-    );
-    assert_eq!(lex.next(), Ok(Token::new(Kind::Whitespace, 7, 8)));
-    lex.restore();
-    assert_eq!(lex.next(), Ok(Token::new(Kind::Ident, 1, 2)));
-    assert_eq!(
-        lex.peek_skip_whitespace(),
-        Ok(&Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.peek_skip_whitespace(),
-        Ok(&Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.next_skip_whitespace(),
-        Ok(Token::new(Kind::Ident, 3, 4))
-    );
-    assert_eq!(
-        lex.next_skip_whitespace(),
-        Ok(Token::new(Kind::Ident, 5, 6))
-    );
-}
-
-#[test]
 fn peek_nth() {
     let code = r#"
 a  b c
@@ -710,10 +690,10 @@ a  b c
 #[test]
 fn quick_test() {
     let code = r#"
-    #00ee00
-    #009900
+    #00ee00 + #009900
     "#;
     let mut lex = Lexer::new(code);
+    lex.set_mode(LexerMode::Color);
     loop {
         let token = lex.get_token().unwrap();
         if matches!(token.kind, Kind::Whitespace) {
